@@ -14,8 +14,8 @@ MODULE_DESCRIPTION("Just a test for char dev");
 MODULE_VERSION("0.1");
 
 static int major;
-static char buf[256] = {0};
-static short size_of_message;
+static char msg[256] = {0};
+static short msg_sz;
 static int open_times = 0;
 static struct class *xy_class = NULL;
 static struct device *xy_device = NULL;
@@ -79,39 +79,51 @@ static int dev_open(struct inode *inodep, struct file *filep){
 	return 0;
 }
 
-static ssize_t dev_read(struct file *filep, char *buffer, size_t len, loff_t *offset){
+static ssize_t dev_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset){
 	ssize_t ret = -EFAULT;
-	// copy_to_user has the format ( * to, *from, size) and returns 0 on success
-	if (!copy_to_user(buffer, buf, size_of_message)) {
-		printk(KERN_INFO "xychar: sent %d characters to the user\n", size_of_message);
-		ret = size_of_message;
-		size_of_message = 0;
+
+	if (len > msg_sz)
+		len = msg_sz;
+
+	if (!copy_to_user(buffer, msg, len)) {
+		printk(KERN_INFO "xychar: sent %lu characters to the user\n", len);
+		ret = len;
+		msg_sz = 0;
 	} else {
-		printk(KERN_INFO "xychar: failed to send %d characters to the user\n", size_of_message);
+		printk(KERN_INFO "xychar: failed to send %lu characters to the user\n", len);
 	}
+
 	return ret;
 }
 
-static ssize_t dev_write(struct file *filep, const char *buffer, size_t len, loff_t *offset){
+static ssize_t dev_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset){
 	int i;
 	char tmp;
+	ssize_t ret = -EFAULT;
+
 	if (len > 255) {
 		len = 255;
 	}
 
-	memcpy(buf, buffer, len);
-	buf[len] = '\0';
-
-	size_of_message = strlen(buf);
-	for (i = 0; i < (size_of_message >> 1); ++i) {
-		tmp = buf[i];
-		buf[i] = buf[size_of_message - 1 - i];
-		buf[size_of_message - 1 - i] = tmp;
+        if (!copy_from_user(msg, buffer, len)) {
+		printk(KERN_INFO "xychar: got %lu chars from user\n", len);
+		msg[len] = '\0';
+		ret = len;
+	} else {
+		printk(KERN_INFO "xychar: failed to get %lu chars from user\n", len);
+		goto out;
 	}
 
+	msg_sz = strlen(msg);
+	for (i = 0; i < (msg_sz >> 1); ++i) {
+		tmp = msg[i];
+		msg[i] = msg[msg_sz - 1 - i];
+		msg[msg_sz - 1 - i] = tmp;
+	}
 
-	printk(KERN_INFO "xychar: revert message: %s\n", buf);
-	return len;
+	printk(KERN_INFO "xychar: revert message: %s\n", msg);
+out:
+	return ret;
 }
 
 static int dev_release(struct inode *inodep, struct file *filep){
